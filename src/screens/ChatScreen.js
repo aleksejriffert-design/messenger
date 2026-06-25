@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import '../styles/ChatScreen.css';
-import { NotificationService } from '../services/NotificationService';
-import { StatsService } from '../services/StatsService';
+import { db } from '../config/firebase';
+import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
 
-export const ChatScreen = ({ chat, onBack, onDeleteChat }) => {
-  const [messages, setMessages] = useState(chat.messages || []);
+export const ChatScreen = ({ chat, user, onBack }) => {
+  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
@@ -13,82 +13,57 @@ export const ChatScreen = ({ chat, onBack, onDeleteChat }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // Загружаем сообщения в реальном времени
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const q = query(
+      collection(db, 'messages'),
+      where('chatId', '==', chat.id),
+      orderBy('timestamp', 'asc')
+    );
 
-  // ✅ ИСПРАВЛЕНО: Добавлена зависимость chat.name
-  useEffect(() => {
-    document.title = `${chat.name} - Messenger`;
-    return () => {
-      document.title = 'Messenger';
-    };
-  }, [chat.name]);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedMessages = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setMessages(loadedMessages);
+      scrollToBottom();
+    }, (err) => {
+      console.error('Ошибка загрузки сообщений:', err);
+    });
+
+    return unsubscribe;
+  }, [chat.id]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     
     if (!newMessage.trim()) return;
 
-    const userMessage = {
-      id: Date.now(),
-      text: newMessage,
-      sender: 'user',
-      timestamp: new Date().toLocaleTimeString('ru-RU', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      }),
-      date: new Date().toLocaleDateString('ru-RU'),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setNewMessage('');
     setIsLoading(true);
+    const messageText = newMessage;
+    setNewMessage('');
 
-    // Имитация задержки ответа
-    setTimeout(() => {
-      const botMessage = {
-        id: Date.now() + 1,
-        text: generateBotResponse(newMessage),
-        sender: 'bot',
-        timestamp: new Date().toLocaleTimeString('ru-RU', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        }),
-        date: new Date().toLocaleDateString('ru-RU'),
-      };
-      
-      setMessages(prev => [...prev, botMessage]);
+    try {
+      // Добавляем сообщение в БД
+      await addDoc(collection(db, 'messages'), {
+        chatId: chat.id,
+        sender: user.email,
+        senderName: user.name,
+        text: messageText,
+        timestamp: serverTimestamp()
+      });
+
+      // Обновляем последнее сообщение в чате
+      await updateDoc(doc(db, 'chats', chat.id), {
+        lastMessage: messageText,
+        lastMessageTime: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Ошибка отправки:', err);
+      setNewMessage(messageText);
+    } finally {
       setIsLoading(false);
-
-      // Отправляем уведомление
-      NotificationService.sendNotification(
-        `${chat.name}`,
-        botMessage.text
-      );
-
-      // Обновляем статистику
-      StatsService.addMessage(chat.id);
-    }, 500 + Math.random() * 1500);
-  };
-
-  const generateBotResponse = (userMessage) => {
-    const responses = [
-      'Интересно! 🤔',
-      'Согласен с тобой! 👍',
-      'Это очень важно! ⭐',
-      'Спасибо за информацию! 📝',
-      'Отлично сказано! 💯',
-      'Я тебя понимаю! 😊',
-      'Это имеет смысл! ✨',
-      'Продолжай в том же духе! 🚀',
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
-  };
-
-  const handleDeleteChat = () => {
-    if (window.confirm(`Удалить чат "${chat.name}"?`)) {
-      onDeleteChat(chat.id);
     }
   };
 
@@ -98,14 +73,7 @@ export const ChatScreen = ({ chat, onBack, onDeleteChat }) => {
         <button className="back-button" onClick={onBack}>
           ← Назад
         </button>
-        <h2>{chat.name}</h2>
-        <button 
-          className="delete-button" 
-          onClick={handleDeleteChat}
-          title="Удалить чат"
-        >
-          🗑️
-        </button>
+        <h2>💬 {chat.name}</h2>
       </div>
 
       <div className="messages-container">
@@ -118,11 +86,16 @@ export const ChatScreen = ({ chat, onBack, onDeleteChat }) => {
           messages.map((msg) => (
             <div 
               key={msg.id} 
-              className={`message ${msg.sender}`}
+              className={`message ${msg.sender === user.email ? 'user' : 'bot'}`}
             >
               <div className="message-content">
                 <p>{msg.text}</p>
-                <span className="message-time">{msg.timestamp}</span>
+                <span className="message-time">
+                  {msg.timestamp?.toDate?.()?.toLocaleTimeString('ru-RU', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  }) || ''}
+                </span>
               </div>
             </div>
           ))

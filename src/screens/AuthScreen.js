@@ -1,66 +1,69 @@
 import React, { useState } from 'react';
 import '../styles/AuthScreen.css';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../config/firebase';
 
-function AuthScreen({ onLogin }) {
+export const AuthScreen = ({ onAuth }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [isLogin, setIsLogin] = useState(true);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleAuth = async (e) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    if (isLogin) {
-      // Вход
-      if (!email || !password) {
-        setError('Заполни все поля');
-        return;
+    try {
+      let userCredential;
+      
+      if (isLogin) {
+        userCredential = await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        userCredential = await createUserWithEmailAndPassword(auth, email, password);
       }
-      onLogin({
-        id: '1',
-        name: 'Пользователь',
-        email: email,
-        avatar: 'https://via.placeholder.com/40'
+
+      const user = userCredential.user;
+      onAuth({
+        id: user.uid,
+        email: user.email,
+        name: user.email.split('@')[0]
       });
-    } else {
-      // Регистрация
-      if (!name || !email || !password) {
-        setError('Заполни все поля');
-        return;
+    } catch (err) {
+      let errorMessage = 'Ошибка авторизации';
+      
+      if (err.code === 'auth/email-already-in-use') {
+        errorMessage = 'Этот email уже зарегистрирован';
+      } else if (err.code === 'auth/weak-password') {
+        errorMessage = 'Пароль слишком слабый (минимум 6 символов)';
+      } else if (err.code === 'auth/user-not-found') {
+        errorMessage = 'Пользователь не найден';
+      } else if (err.code === 'auth/wrong-password') {
+        errorMessage = 'Неверный пароль';
+      } else if (err.code === 'auth/invalid-email') {
+        errorMessage = 'Неверный email';
       }
-      onLogin({
-        id: '1',
-        name: name,
-        email: email,
-        avatar: 'https://via.placeholder.com/40'
-      });
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h1>📱 Messenger</h1>
+    <div className="auth-screen">
+      <div className="auth-container">
+        <h1>💬 Messenger</h1>
         
-        <form onSubmit={handleSubmit}>
-          {!isLogin && (
-            <input
-              type="text"
-              placeholder="Твоё имя"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="auth-input"
-            />
-          )}
-          
+        <form onSubmit={handleAuth} className="auth-form">
           <input
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="auth-input"
+            required
+            disabled={loading}
           />
           
           <input
@@ -68,28 +71,34 @@ function AuthScreen({ onLogin }) {
             placeholder="Пароль"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="auth-input"
+            required
+            disabled={loading}
           />
 
-          {error && <p className="error">{error}</p>}
+          {error && <div className="error-message">❌ {error}</div>}
 
-          <button type="submit" className="auth-button">
-            {isLogin ? 'Вход' : 'Регистрация'}
+          <button type="submit" disabled={loading}>
+            {loading ? '⏳ Загрузка...' : (isLogin ? '🔓 Вход' : '📝 Регистрация')}
           </button>
         </form>
 
-        <p className="toggle-auth">
-          {isLogin ? 'Нет аккаунта? ' : 'Уже есть аккаунт? '}
-          <button 
-            onClick={() => setIsLogin(!isLogin)}
-            className="toggle-button"
-          >
-            {isLogin ? 'Зарегистрируйся' : 'Войди'}
-          </button>
-        </p>
+        <button 
+          className="toggle-button"
+          onClick={() => {
+            setIsLogin(!isLogin);
+            setError('');
+          }}
+          disabled={loading}
+        >
+          {isLogin ? '📝 Нет аккаунта? Зарегистрируйся' : '🔓 Уже есть аккаунт? Войди'}
+        </button>
+
+        <div className="auth-info">
+          <p>🧪 Тестовые данные:</p>
+          <p>Email: test@example.com</p>
+          <p>Пароль: 123456</p>
+        </div>
       </div>
     </div>
   );
-}
-
-export default AuthScreen;
+};
